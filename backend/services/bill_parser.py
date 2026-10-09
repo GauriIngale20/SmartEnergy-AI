@@ -1,10 +1,13 @@
 ﻿
+
 import csv
 import io
 import os
 import re
 from datetime import datetime
 
+import numpy as np
+from PIL import Image, ImageOps, ImageEnhance
 from pypdf import PdfReader
 
 try:
@@ -82,6 +85,7 @@ def _normalize_month(value):
             pass
 
     match = re.search(r"\b(20\d{2})[-/](0?[1-9]|1[0-2])\b", value)
+
     if match:
         return f"{match.group(1)}-{int(match.group(2)):02d}"
 
@@ -108,14 +112,16 @@ def _normalize_date(value):
 def _number_after(text, patterns):
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
+
         if match:
             raw = match.group(1).replace(",", "").strip()
+
             try:
                 return float(raw)
             except ValueError:
                 continue
-    return None
 
+    return None
 
 
 def _parse_text(text):
@@ -123,13 +129,13 @@ def _parse_text(text):
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"(?<=\d)[Oo](?=\d)", "0", text)
 
-    # Normalize Marathi month names to English.
     normalized = text
+
     for marathi, english in MARATHI_MONTHS.items():
         normalized = normalized.replace(marathi, english)
 
-    # Month: prioritize the bill's heading.
     month = None
+
     month_patterns = [
         r"(?:BILL OF SUPPLY FOR THE MONTH OF|"
         r"bill\s*month|billing\s*month|billing\s*period|"
@@ -142,27 +148,30 @@ def _parse_text(text):
 
     for pattern in month_patterns:
         match = re.search(pattern, normalized, re.IGNORECASE)
+
         if match:
             candidate = (
-                match.group(1) if len(match.groups()) == 1
+                match.group(1)
+                if len(match.groups()) == 1
                 else match.group(1) + " " + match.group(2)
             )
+
             month = _normalize_month(candidate)
+
             if month:
                 break
 
-    # Marathi month fallback.
     if not month:
         for marathi in MARATHI_MONTHS:
             match = re.search(
                 re.escape(marathi) + r"\s*[-/ ]\s*(20\d{2})",
                 text
             )
+
             if match:
                 month = _normalize_month(match.group(0))
                 break
 
-    # Units: look for explicit labels first.
     units = _number_after(text, [
         r"(?:units?\s*consumed|energy\s*consumed|"
         r"total\s*units|unit\s*consumption|"
@@ -170,9 +179,6 @@ def _parse_text(text):
         r"\s*[:=\-]?\s*([\d,]+(?:\.\d+)?)"
     ])
 
-    # MSEDCL meter-reading table commonly shows:
-    # current reading, previous reading, multiplier, consumption.
-    # For this bill, the table contains 2879 204 1.00 85 0 85.
     if units is None:
         meter_match = re.search(
             r"चालू\s*रिडिंग.*?मागील\s*रीडिंग.*?"
@@ -180,31 +186,32 @@ def _parse_text(text):
             text,
             re.IGNORECASE
         )
+
         if meter_match:
             numbers = re.findall(
                 r"(?<![\d/.-])\d+(?:\.\d+)?(?![\d/.-])",
                 meter_match.group(1)
             )
-            # Consumption is normally the fourth number in this row.
+
             if len(numbers) >= 4:
                 try:
                     candidate = float(numbers[3])
+
                     if 0 < candidate < 100000:
                         units = candidate
                 except ValueError:
                     pass
 
-    # Fallback: identify a standalone kWh or units value.
     if units is None:
         units = _number_after(text, [
             r"\b([\d,]+(?:\.\d+)?)\s*kwh\b",
             r"\b([\d,]+(?:\.\d+)?)\s*units?\b",
         ])
 
-    # Amount: prioritize the amount explicitly paired with the bill date.
     amount = None
+
     amount_patterns = [
-        r"(?:बिलिंग तारीख|बिलिंग तारीख|Bill Amount)"
+        r"(?:बिलिंग तारीख|Bill Amount)"
         r"[^\n]{0,100}?"
         r"(?:Rs\.?|INR)\s*([\d,]+\.\d{1,2})",
         r"(?:12[-/.]10[-/.]2026)"
@@ -217,11 +224,10 @@ def _parse_text(text):
 
     for pattern in amount_patterns:
         amount = _number_after(text, [pattern])
+
         if amount is not None:
             break
 
-    # For this MSEDCL bill, the amount row lists the payment date
-    # and the corresponding payable amount together.
     if amount is None:
         for line in text.splitlines():
             if re.search(r"12[-/.]10[-/.]2026", line):
@@ -230,12 +236,13 @@ def _parse_text(text):
                     line,
                     re.IGNORECASE
                 )
+
                 if match:
-                    amount = float(match.group(1).replace(",", ""))
+                    amount = float(
+                        match.group(1).replace(",", "")
+                    )
                     break
 
-    # Last resort: use a clearly labelled amount, not the first
-    # arbitrary currency value (which may be the early-payment amount).
     if amount is None:
         amount = _number_after(text, [
             r"(?:current\s*bill|bill\s*total|"
@@ -243,8 +250,8 @@ def _parse_text(text):
             r"([\d,]+(?:\.\d{1,2})?)"
         ])
 
-    # Due date.
     due_date_text = None
+
     date_match = re.search(
         r"(?:due\s*date|pay\s*by|last\s*date\s*of\s*payment|"
         r"देय\s*दिनांक|अंतिम\s*दिनांक)"
@@ -287,8 +294,10 @@ def parse_bill_file(filename, content):
         def get_value(*names):
             for name in names:
                 value = row.get(name)
+
                 if value not in (None, ""):
                     return value
+
             return None
 
         month = _normalize_month(
@@ -303,23 +312,32 @@ def parse_bill_file(filename, content):
             amount = float(str(get_value(
                 "amount", "billamount", "totalamount", "amountpayable"
             )).replace(",", "").replace("₹", "").replace("Rs.", "").strip())
+
         except (TypeError, ValueError):
-            raise ValueError("CSV must contain valid units and amount values.")
+            raise ValueError(
+                "CSV must contain valid units and amount values."
+            )
 
         if not month or units <= 0 or amount <= 0:
-            raise ValueError("CSV needs valid month, units and amount columns.")
+            raise ValueError(
+                "CSV needs valid month, units and amount columns."
+            )
 
         return {
             "month": month,
             "units": units,
             "amount": amount,
-            "dueDate": _normalize_date(get_value("duedate", "payby")),
+            "dueDate": _normalize_date(
+                get_value("duedate", "payby")
+            ),
             "needs_review": True,
         }
 
-    if extension == "pdf":
+    elif extension == "pdf":
         reader = PdfReader(io.BytesIO(content))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        text = "\n".join(
+            page.extract_text() or "" for page in reader.pages
+        )
 
         if not text.strip():
             raise ValueError(
@@ -335,54 +353,47 @@ def parse_bill_file(filename, content):
             )
 
         try:
-            from PIL import Image, ImageOps, ImageEnhance, ImageFilter
-
             image = Image.open(io.BytesIO(content))
             image = ImageOps.exif_transpose(image).convert("RGB")
 
-            # OCR works better when the original image is not too small.
-            if image.width < 1800:
-                scale = 1800 / image.width
-                image = image.resize(
-                    (1800, int(image.height * scale))
-                )
+            # Reduce image dimensions before OCR to limit memory use.
+            image.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
 
             gray = ImageOps.grayscale(image)
-            gray = ImageEnhance.Contrast(gray).enhance(2.0)
-            gray = ImageEnhance.Sharpness(gray).enhance(1.5)
-            gray = gray.filter(ImageFilter.SHARPEN)
+            gray = ImageEnhance.Contrast(gray).enhance(1.8)
+
+            gray_array = np.array(gray)
 
             result = None
             best_score = -1
 
-            for language in ("eng+mar", "eng"):
-                for config in ("--psm 6", "--psm 11"):
-                    text = pytesseract.image_to_string(
-                        gray, lang=language, config=config
-                    )
-                    print(
-                        f"\nOCR LANGUAGE={language}, CONFIG={config}\n{text}"
-                    )
+            for config in ("--psm 6", "--psm 11"):
+                text = pytesseract.image_to_string(
+                    gray_array,
+                    lang="eng",
+                    config=config,
+                    timeout=10
+                )
 
-                    candidate = _parse_text(text)
-                    score = sum(
-                        candidate.get(key) is not None
-                        for key in ("month", "units", "amount")
-                    )
+                print(f"OCR CONFIG={config}\n{text[:1500]}")
 
-                    if score > best_score:
-                        result = candidate
-                        best_score = score
+                candidate = _parse_text(text)
 
-                    if best_score == 3:
-                        break
+                score = sum(
+                    candidate.get(key) is not None
+                    for key in ("month", "units", "amount")
+                )
+
+                if score > best_score:
+                    result = candidate
+                    best_score = score
 
                 if best_score == 3:
                     break
 
         except Exception as exc:
             raise ValueError(
-                f"Image OCR failed: {exc}"
+                f"Image OCR failed or timed out: {exc}"
             ) from exc
 
     else:
@@ -398,7 +409,7 @@ def parse_bill_file(filename, content):
     ):
         raise ValueError(
             "Could not reliably identify month, units and amount. "
-            "Please enter missing values manually or use a clearer bill."
+            "Please use a clearer bill or check the extracted values."
         )
 
     return result
