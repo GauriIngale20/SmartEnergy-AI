@@ -369,11 +369,11 @@ def parse_bill_file(filename, content):
 
             for config in ("--psm 6", "--psm 11"):
                 text = pytesseract.image_to_string(
-                    gray_array,
-                    lang="eng",
-                    config=config,
-                    timeout=10
-                )
+    gray_array,
+    lang="eng",
+    config=config,
+    timeout=30
+)
 
                 print(f"OCR CONFIG={config}\n{text[:1500]}")
 
