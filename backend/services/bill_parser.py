@@ -1,5 +1,4 @@
-﻿
-import csv
+﻿import csv
 import io
 import os
 import re
@@ -12,14 +11,9 @@ from pypdf import PdfReader
 try:
     import pytesseract
 
-    tesseract_path = os.environ.get(
-        "TESSERACT_CMD",
-        r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    )
-
-    if os.path.isfile(tesseract_path):
+    tesseract_path = os.environ.get("TESSERACT_CMD")
+    if tesseract_path and os.path.isfile(tesseract_path):
         pytesseract.pytesseract.tesseract_cmd = tesseract_path
-
 except ImportError:
     pytesseract = None
 
@@ -49,8 +43,7 @@ def _normalize_month(value):
     for marathi, english in MARATHI_MONTHS.items():
         value = value.replace(marathi, english)
 
-    value = re.sub(r"\s+", " ", value)
-    value = value.replace("_", "-").strip(" :-")
+    value = re.sub(r"\s+", " ", value).replace("_", "-").strip(" :-")
 
     formats = (
         "%Y-%m", "%Y/%m", "%m/%Y", "%m-%Y",
@@ -70,16 +63,15 @@ def _normalize_month(value):
         r"September|October|November|December|Jan|Feb|Mar|Apr|"
         r"Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s/-]+(20\d{2})\b",
         value,
-        re.IGNORECASE
+        re.IGNORECASE,
     )
 
     if match:
         try:
-            parsed = datetime.strptime(
+            return datetime.strptime(
                 match.group(1)[:3].title() + " " + match.group(2),
-                "%b %Y"
-            )
-            return parsed.strftime("%Y-%m")
+                "%b %Y",
+            ).strftime("%Y-%m")
         except ValueError:
             pass
 
@@ -97,9 +89,7 @@ def _normalize_date(value):
 
     value = value.strip()
 
-    for fmt in (
-        "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y"
-    ):
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y"):
         try:
             return datetime.strptime(value, fmt).strftime("%Y-%m-%d")
         except ValueError:
@@ -136,10 +126,9 @@ def _parse_text(text):
     month = None
 
     month_patterns = [
-        r"(?:BILL OF SUPPLY FOR THE MONTH OF|"
-        r"bill\s*month|billing\s*month|billing\s*period|"
-        r"bill\s*period)\s*[-: ]*\s*"
-        r"([A-Za-z]{3,12}[\s/-]*20\d{2})",
+        r"(?:BILL OF SUPPLY FOR THE MONTH OF|bill\s*month|"
+        r"billing\s*month|billing\s*period|bill\s*period)"
+        r"\s*[-: ]*\s*([A-Za-z]{3,12}[\s/-]*20\d{2})",
 
         r"\b(January|February|March|April|May|June|July|August|"
         r"September|October|November|December|Jan|Feb|Mar|Apr|"
@@ -165,7 +154,7 @@ def _parse_text(text):
         for marathi in MARATHI_MONTHS:
             match = re.search(
                 re.escape(marathi) + r"\s*[-/ ]\s*(20\d{2})",
-                text
+                text,
             )
 
             if match:
@@ -173,9 +162,8 @@ def _parse_text(text):
                 break
 
     units_patterns = [
-        r"(?:units?\s*consumed|energy\s*consumed|"
-        r"total\s*units|unit\s*consumption|"
-        r"एकूण\s*वापर|वीज\s*वापर|एकूण\s*युनिट्स?)"
+        r"(?:units?\s*consumed|energy\s*consumed|total\s*units|"
+        r"unit\s*consumption|एकूण\s*वापर|वीज\s*वापर|एकूण\s*युनिट्स?)"
         r"\s*[:=\-]?\s*([\d,]+(?:\.\d+)?)",
 
         r"\b([\d,]+(?:\.\d+)?)\s*kwh\b",
@@ -185,12 +173,10 @@ def _parse_text(text):
     units = _number_after(text, units_patterns)
 
     amount_patterns = [
-        r"(?:amount payable|current bill amount|"
-        r"total amount payable|net amount|amount due|"
-        r"bill amount|bill total|payable amount|"
+        r"(?:amount payable|current bill amount|total amount payable|"
+        r"net amount|amount due|bill amount|bill total|payable amount|"
         r"देय रक्कम|बिलाची रक्कम|एकूण देय रक्कम)"
-        r"[^\d\n]{0,50}(?:Rs\.?|INR)?\s*"
-        r"([\d,]+(?:\.\d{1,2})?)",
+        r"[^\d\n]{0,50}(?:Rs\.?|INR)?\s*([\d,]+(?:\.\d{1,2})?)",
 
         r"(?:Rs\.?|INR)\s*([\d,]+\.\d{1,2})",
     ]
@@ -204,7 +190,7 @@ def _parse_text(text):
         r"देय\s*दिनांक|अंतिम\s*दिनांक)"
         r"\s*[:\-]?\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{4})",
         text,
-        re.IGNORECASE
+        re.IGNORECASE,
     )
 
     if date_match:
@@ -219,7 +205,45 @@ def _parse_text(text):
     }
 
 
+def _extract_image_text(content):
+    if pytesseract is None:
+        raise ValueError("Tesseract OCR is not available on the server.")
+
+    try:
+        with Image.open(io.BytesIO(content)) as source_image:
+            image = ImageOps.exif_transpose(source_image)
+            image.thumbnail((800, 800), Image.Resampling.LANCZOS)
+
+            gray = ImageOps.grayscale(image)
+            gray = ImageEnhance.Contrast(gray).enhance(1.4)
+            image_array = np.asarray(gray, dtype=np.uint8)
+
+        try:
+            text = pytesseract.image_to_string(
+                image_array,
+                lang="eng",
+                config="--psm 6",
+                timeout=12,
+            )
+        finally:
+            del image_array
+
+        print(f"OCR extracted {len(text)} characters.")
+        return text
+
+    except RuntimeError as exc:
+        raise ValueError(
+            "Image OCR timed out. Upload a smaller, clearer bill image."
+        ) from exc
+
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise ValueError("Could not open the uploaded image.") from exc
+
+
 def parse_bill_file(filename, content):
+    if not filename or "." not in filename:
+        raise ValueError("Please upload a valid bill file.")
+
     extension = filename.lower().rsplit(".", 1)[-1]
 
     if extension == "csv":
@@ -249,15 +273,13 @@ def parse_bill_file(filename, content):
         try:
             units = float(
                 str(get_value(
-                    "units", "unit", "kwh",
-                    "unitsconsumed", "consumption"
-                )).replace(",", "")
+                    "units", "unit", "kwh", "unitsconsumed", "consumption"
+                )).replace(",", "").strip()
             )
 
             amount = float(
                 str(get_value(
-                    "amount", "billamount",
-                    "totalamount", "amountpayable"
+                    "amount", "billamount", "totalamount", "amountpayable"
                 ))
                 .replace(",", "")
                 .replace("₹", "")
@@ -270,9 +292,15 @@ def parse_bill_file(filename, content):
                 "CSV must contain valid units and amount values."
             )
 
-        if not month or units <= 0 or amount <= 0:
+        if (
+            not month
+            or not np.isfinite(units)
+            or not np.isfinite(amount)
+            or units <= 0
+            or amount <= 0
+        ):
             raise ValueError(
-                "CSV needs valid month, units and amount columns."
+                "CSV needs valid month, positive units and positive amount."
             )
 
         result = {
@@ -286,49 +314,24 @@ def parse_bill_file(filename, content):
         }
 
     elif extension == "pdf":
-        reader = PdfReader(io.BytesIO(content))
-        text = "\n".join(
-            page.extract_text() or "" for page in reader.pages
-        )
+        try:
+            reader = PdfReader(io.BytesIO(content))
+            text = "\n".join(
+                page.extract_text() or "" for page in reader.pages
+            )
+        except Exception as exc:
+            raise ValueError("Could not read this PDF file.") from exc
 
         if not text.strip():
             raise ValueError(
-                "PDF has no selectable text. Try a clearer PDF or image."
+                "PDF has no selectable text. Upload a text-based PDF "
+                "or a clear bill image."
             )
 
         result = _parse_text(text)
 
     elif extension in ("jpg", "jpeg", "png", "webp"):
-        if pytesseract is None:
-            raise ValueError(
-                "Tesseract OCR is not available on the server."
-            )
-
-        try:
-            with Image.open(io.BytesIO(content)) as source_image:
-                image = ImageOps.exif_transpose(source_image)
-                image.thumbnail((1000, 1000), Image.Resampling.LANCZOS)
-
-                gray = ImageOps.grayscale(image)
-                gray = ImageEnhance.Contrast(gray).enhance(1.5)
-                gray_array = np.array(gray)
-
-            text = pytesseract.image_to_string(
-                gray_array,
-                lang="eng",
-                config="--psm 6",
-                timeout=20
-            )
-
-            print(f"OCR extracted {len(text)} characters.")
-            result = _parse_text(text)
-
-            del gray_array
-
-        except Exception as exc:
-            raise ValueError(
-                f"Image OCR failed: {exc}"
-            ) from exc
+        result = _parse_text(_extract_image_text(content))
 
     else:
         raise ValueError(
@@ -342,8 +345,8 @@ def parse_bill_file(filename, content):
         or result.get("amount") is None
     ):
         raise ValueError(
-            "Could not identify the bill month, units and amount. "
-            "Please upload a clearer bill or enter the values manually."
+            "Could not identify bill month, units and amount. "
+            "Upload a clearer bill or enter the values manually."
         )
 
     return result
