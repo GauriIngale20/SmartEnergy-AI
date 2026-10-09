@@ -1,0 +1,262 @@
+/* SmartEnergy AI — animations and interactions */
+
+@keyframes float {
+0%, 100% {
+transform: translateY(0);
+}
+50% {
+transform: translateY(-9px);
+}
+}
+
+@keyframes fade-in {
+from {
+opacity: 0;
+transform: translateY(14px);
+}
+to {
+opacity: 1;
+transform: translateY(0);
+}
+}
+
+@keyframes slide-in {
+from {
+opacity: 0;
+transform: translateX(-12px);
+}
+to {
+opacity: 1;
+transform: translateX(0);
+}
+}
+
+@keyframes pop-in {
+from {
+opacity: 0;
+transform: scale(0.96);
+}
+to {
+opacity: 1;
+transform: scale(1);
+}
+}
+
+@keyframes spin {
+to {
+transform: rotate(360deg);
+}
+}
+
+@keyframes pulse-soft {
+0%, 100% {
+box-shadow: 0 0 0 0 rgba(21, 148, 71, 0.12);
+}
+50% {
+box-shadow: 0 0 0 6px rgba(21, 148, 71, 0);
+}
+}
+
+/* Page entrance */
+.page-content {
+animation: fade-in 0.45s ease-out both;
+}
+
+.page-title-row {
+animation: slide-in 0.4s ease-out both;
+}
+
+.hero-card {
+animation: pop-in 0.5s ease-out both;
+}
+
+/* Staggered dashboard cards */
+.stats-grid .stat-card {
+animation: fade-in 0.45s ease-out both;
+}
+
+.stats-grid .stat-card:nth-child(2) {
+animation-delay: 0.06s;
+}
+
+.stats-grid .stat-card:nth-child(3) {
+animation-delay: 0.12s;
+}
+
+.stats-grid .stat-card:nth-child(4) {
+animation-delay: 0.18s;
+}
+
+.dashboard-grid .content-card,
+.bottom-grid .content-card {
+animation: fade-in 0.5s ease-out both;
+}
+
+/* Card hover effects */
+.content-card,
+.stat-card,
+.appliance-card {
+transition:
+transform 0.25s ease,
+border-color 0.25s ease,
+box-shadow 0.25s ease,
+background-color 0.25s ease;
+}
+
+.content-card:hover,
+.stat-card:hover,
+.appliance-card:hover {
+transform: translateY(-4px);
+border-color: #c6e8ce;
+box-shadow: 0 14px 32px rgba(31, 68, 45, 0.09);
+}
+
+/* Button interactions */
+.primary-button,
+.hero-button,
+.secondary-button,
+.icon-button,
+.menu-button,
+.brand-mark,
+.nav-item,
+.text-button {
+transition:
+color 0.2s ease,
+background-color 0.2s ease,
+border-color 0.2s ease,
+box-shadow 0.2s ease,
+transform 0.2s ease;
+}
+
+.primary-button:hover,
+.hero-button:hover {
+transform: translateY(-2px);
+box-shadow: 0 8px 18px rgba(21, 148, 71, 0.22);
+}
+
+.primary-button:active,
+.hero-button:active,
+.secondary-button:active,
+.icon-button:active {
+transform: scale(0.97);
+}
+
+.secondary-button:hover,
+.icon-button:hover,
+.menu-button:hover {
+transform: translateY(-2px);
+box-shadow: 0 5px 14px rgba(31, 68, 45, 0.08);
+}
+
+.brand-mark:hover {
+transform: rotate(-7deg) scale(1.05);
+box-shadow: 0 6px 16px rgba(21, 148, 71, 0.16);
+}
+
+/* Sidebar navigation */
+.nav-item {
+overflow: hidden;
+}
+
+.nav-item:hover {
+transform: translateX(3px);
+}
+
+.nav-item.active {
+box-shadow: inset 3px 0 0 #159447;
+}
+
+.nav-item svg {
+flex-shrink: 0;
+transition: transform 0.2s ease;
+}
+
+.nav-item:hover svg {
+transform: scale(1.1);
+}
+
+/* Small animated details */
+.energy-circle {
+animation: float 4s ease-in-out infinite;
+}
+
+.floating-leaf {
+animation: float 5s ease-in-out infinite reverse;
+}
+
+.status-pill span,
+.nav-dot {
+animation: pulse-soft 2.2s ease-in-out infinite;
+}
+
+.progress-fill {
+transition: width 0.7s ease;
+}
+
+.mini-track > div {
+transition: width 0.6s ease;
+}
+
+.alert-row,
+.recommendation-row,
+.tip-item {
+transition:
+background-color 0.2s ease,
+padding-left 0.2s ease;
+}
+
+.alert-row:hover,
+.recommendation-row:hover,
+.tip-item:hover {
+padding-left: 6px;
+}
+
+/* Loading animation */
+.loading-container {
+min-height: 200px;
+display: flex;
+flex-direction: column;
+justify-content: center;
+align-items: center;
+gap: 12px;
+color: var(--green);
+}
+
+.loading-icon {
+animation: float 2s ease-in-out infinite;
+}
+
+.loading-spinner {
+width: 30px;
+height: 30px;
+border: 3px solid #dcefe1;
+border-top-color: #159447;
+border-radius: 50%;
+animation: spin 0.8s linear infinite;
+}
+
+.loading-container p {
+color: var(--muted);
+font-size: 12px;
+}
+
+/* Keyboard accessibility */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+outline: 2px solid #159447;
+outline-offset: 3px;
+}
+
+/* Respect reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+*,
+*::before,
+*::after {
+animation-duration: 0.01ms !important;
+animation-iteration-count: 1 !important;
+transition-duration: 0.01ms !important;
+scroll-behavior: auto !important;
+}
+}
