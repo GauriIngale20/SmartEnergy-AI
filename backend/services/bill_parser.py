@@ -1,5 +1,4 @@
 ﻿
-
 import csv
 import io
 import os
@@ -141,6 +140,7 @@ def _parse_text(text):
         r"bill\s*month|billing\s*month|billing\s*period|"
         r"bill\s*period)\s*[-: ]*\s*"
         r"([A-Za-z]{3,12}[\s/-]*20\d{2})",
+
         r"\b(January|February|March|April|May|June|July|August|"
         r"September|October|November|December|Jan|Feb|Mar|Apr|"
         r"Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s/-]+(20\d{2})\b",
@@ -172,83 +172,30 @@ def _parse_text(text):
                 month = _normalize_month(match.group(0))
                 break
 
-    units = _number_after(text, [
+    units_patterns = [
         r"(?:units?\s*consumed|energy\s*consumed|"
         r"total\s*units|unit\s*consumption|"
         r"एकूण\s*वापर|वीज\s*वापर|एकूण\s*युनिट्स?)"
-        r"\s*[:=\-]?\s*([\d,]+(?:\.\d+)?)"
-    ])
+        r"\s*[:=\-]?\s*([\d,]+(?:\.\d+)?)",
 
-    if units is None:
-        meter_match = re.search(
-            r"चालू\s*रिडिंग.*?मागील\s*रीडिंग.*?"
-            r"गुणक.*?([\s\S]{0,250})",
-            text,
-            re.IGNORECASE
-        )
-
-        if meter_match:
-            numbers = re.findall(
-                r"(?<![\d/.-])\d+(?:\.\d+)?(?![\d/.-])",
-                meter_match.group(1)
-            )
-
-            if len(numbers) >= 4:
-                try:
-                    candidate = float(numbers[3])
-
-                    if 0 < candidate < 100000:
-                        units = candidate
-                except ValueError:
-                    pass
-
-    if units is None:
-        units = _number_after(text, [
-            r"\b([\d,]+(?:\.\d+)?)\s*kwh\b",
-            r"\b([\d,]+(?:\.\d+)?)\s*units?\b",
-        ])
-
-    amount = None
-
-    amount_patterns = [
-        r"(?:बिलिंग तारीख|Bill Amount)"
-        r"[^\n]{0,100}?"
-        r"(?:Rs\.?|INR)\s*([\d,]+\.\d{1,2})",
-        r"(?:12[-/.]10[-/.]2026)"
-        r"[^\n]{0,100}?(?:Rs\.?|INR)\s*([\d,]+\.\d{1,2})",
-        r"(?:amount payable|current bill amount|"
-        r"total amount payable|net amount|amount due|"
-        r"देय रक्कम|बिलाची रक्कम|एकूण देय रक्कम)"
-        r"[^\d\n]{0,40}([\d,]+(?:\.\d{1,2})?)",
+        r"\b([\d,]+(?:\.\d+)?)\s*kwh\b",
+        r"\b([\d,]+(?:\.\d+)?)\s*units?\b",
     ]
 
-    for pattern in amount_patterns:
-        amount = _number_after(text, [pattern])
+    units = _number_after(text, units_patterns)
 
-        if amount is not None:
-            break
+    amount_patterns = [
+        r"(?:amount payable|current bill amount|"
+        r"total amount payable|net amount|amount due|"
+        r"bill amount|bill total|payable amount|"
+        r"देय रक्कम|बिलाची रक्कम|एकूण देय रक्कम)"
+        r"[^\d\n]{0,50}(?:Rs\.?|INR)?\s*"
+        r"([\d,]+(?:\.\d{1,2})?)",
 
-    if amount is None:
-        for line in text.splitlines():
-            if re.search(r"12[-/.]10[-/.]2026", line):
-                match = re.search(
-                    r"(?:Rs\.?|INR)\s*([\d,]+\.\d{1,2})",
-                    line,
-                    re.IGNORECASE
-                )
+        r"(?:Rs\.?|INR)\s*([\d,]+\.\d{1,2})",
+    ]
 
-                if match:
-                    amount = float(
-                        match.group(1).replace(",", "")
-                    )
-                    break
-
-    if amount is None:
-        amount = _number_after(text, [
-            r"(?:current\s*bill|bill\s*total|"
-            r"payable\s*amount)[^\d\n]{0,40}"
-            r"([\d,]+(?:\.\d{1,2})?)"
-        ])
+    amount = _number_after(text, amount_patterns)
 
     due_date_text = None
 
@@ -263,13 +210,10 @@ def _parse_text(text):
     if date_match:
         due_date_text = date_match.group(1)
 
-    if not due_date_text:
-        due_date_text = "12-10-2026"
-
     return {
         "month": month,
-        "units": units if units and units > 0 else None,
-        "amount": amount if amount and amount > 0 else None,
+        "units": units if units is not None and units > 0 else None,
+        "amount": amount if amount is not None and amount > 0 else None,
         "dueDate": _normalize_date(due_date_text),
         "needs_review": True,
     }
@@ -286,18 +230,16 @@ def parse_bill_file(filename, content):
             raise ValueError("The CSV file contains no bill records.")
 
         row = {
-            re.sub(r"[^a-z]", "", str(k).lower()): v
-            for k, v in rows[0].items()
-            if k is not None
+            re.sub(r"[^a-z]", "", str(key).lower()): value
+            for key, value in rows[0].items()
+            if key is not None
         }
 
         def get_value(*names):
             for name in names:
                 value = row.get(name)
-
                 if value not in (None, ""):
                     return value
-
             return None
 
         month = _normalize_month(
@@ -305,13 +247,23 @@ def parse_bill_file(filename, content):
         )
 
         try:
-            units = float(str(get_value(
-                "units", "unit", "kwh", "unitsconsumed", "consumption"
-            )).replace(",", ""))
+            units = float(
+                str(get_value(
+                    "units", "unit", "kwh",
+                    "unitsconsumed", "consumption"
+                )).replace(",", "")
+            )
 
-            amount = float(str(get_value(
-                "amount", "billamount", "totalamount", "amountpayable"
-            )).replace(",", "").replace("₹", "").replace("Rs.", "").strip())
+            amount = float(
+                str(get_value(
+                    "amount", "billamount",
+                    "totalamount", "amountpayable"
+                ))
+                .replace(",", "")
+                .replace("₹", "")
+                .replace("Rs.", "")
+                .strip()
+            )
 
         except (TypeError, ValueError):
             raise ValueError(
@@ -323,7 +275,7 @@ def parse_bill_file(filename, content):
                 "CSV needs valid month, units and amount columns."
             )
 
-        return {
+        result = {
             "month": month,
             "units": units,
             "amount": amount,
@@ -349,51 +301,33 @@ def parse_bill_file(filename, content):
     elif extension in ("jpg", "jpeg", "png", "webp"):
         if pytesseract is None:
             raise ValueError(
-                "Install pytesseract and Pillow in the backend environment."
+                "Tesseract OCR is not available on the server."
             )
 
         try:
-            image = Image.open(io.BytesIO(content))
-            image = ImageOps.exif_transpose(image).convert("RGB")
+            with Image.open(io.BytesIO(content)) as source_image:
+                image = ImageOps.exif_transpose(source_image)
+                image.thumbnail((1000, 1000), Image.Resampling.LANCZOS)
 
-            # Reduce image dimensions before OCR to limit memory use.
-            image.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+                gray = ImageOps.grayscale(image)
+                gray = ImageEnhance.Contrast(gray).enhance(1.5)
+                gray_array = np.array(gray)
 
-            gray = ImageOps.grayscale(image)
-            gray = ImageEnhance.Contrast(gray).enhance(1.8)
+            text = pytesseract.image_to_string(
+                gray_array,
+                lang="eng",
+                config="--psm 6",
+                timeout=20
+            )
 
-            gray_array = np.array(gray)
+            print(f"OCR extracted {len(text)} characters.")
+            result = _parse_text(text)
 
-            result = None
-            best_score = -1
-
-            for config in ("--psm 6", "--psm 11"):
-                text = pytesseract.image_to_string(
-    gray_array,
-    lang="eng",
-    config=config,
-    timeout=30
-)
-
-                print(f"OCR CONFIG={config}\n{text[:1500]}")
-
-                candidate = _parse_text(text)
-
-                score = sum(
-                    candidate.get(key) is not None
-                    for key in ("month", "units", "amount")
-                )
-
-                if score > best_score:
-                    result = candidate
-                    best_score = score
-
-                if best_score == 3:
-                    break
+            del gray_array
 
         except Exception as exc:
             raise ValueError(
-                f"Image OCR failed or timed out: {exc}"
+                f"Image OCR failed: {exc}"
             ) from exc
 
     else:
@@ -408,8 +342,8 @@ def parse_bill_file(filename, content):
         or result.get("amount") is None
     ):
         raise ValueError(
-            "Could not reliably identify month, units and amount. "
-            "Please use a clearer bill or check the extracted values."
+            "Could not identify the bill month, units and amount. "
+            "Please upload a clearer bill or enter the values manually."
         )
 
     return result
